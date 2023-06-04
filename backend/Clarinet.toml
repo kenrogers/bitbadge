@@ -1,0 +1,34 @@
+[project]
+name = 'backend'
+description = ''
+authors = []
+telemetry = true
+cache_dir = './.cache'
+requirements = []
+[contracts.bitbadge-nft]
+path = 'contracts/bitbadge-nft.clar'
+clarity_version = 2
+epoch = 2.1
+
+[contracts.clarity-bitcoin]
+path = 'contracts/clarity-bitcoin.clar'
+clarity_version = 2
+epoch = 2.1
+
+[contracts.clarity-bitcoin-helper]
+path = 'contracts/clarity-bitcoin-helper.clar'
+clarity_version = 2
+epoch = 2.1
+
+[contracts.sip009-nft-trait]
+path = 'contracts/sip009-nft-trait.clar'
+clarity_version = 2
+epoch = 2.1
+[repl.analysis]
+passes = ['check_checker']
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
