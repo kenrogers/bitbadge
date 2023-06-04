@@ -39,7 +39,7 @@
             (tx-was-mined (try! (contract-call? .clarity-bitcoin was-tx-mined height tx header proof)))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-        ;; (asserts! (is-eq tx-was-mined true) err-tx-not-mined)
+        (asserts! (is-eq tx-was-mined true) err-tx-not-mined)
         (try! (nft-mint? bitbadge token-id recipient))
         (var-set last-token-id token-id)
         (ok token-id)
