@@ -7,6 +7,9 @@ cache_dir = './.cache'
 
 [[project.requirements]]
 contract_id = 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.clarity-bitcoin-helper'
+
+[[project.requirements]]
+contract_id = 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.bitbadge-v1'
 [contracts.bitbadge-nft]
 path = 'contracts/bitbadge-nft.clar'
 clarity_version = 2

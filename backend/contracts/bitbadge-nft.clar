@@ -1,4 +1,4 @@
-(impl-trait .sip009-nft-trait.sip009-nft-trait)
+(impl-trait 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.sip009-nft-trait.sip009-nft-trait)
 
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
@@ -32,11 +32,11 @@
     )
 )
 
-(define-public (mint (recipient principal) (height uint) (tx (buff 1024)) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}) (header { version: (buff 4), parent: (buff 32), merkle-root: (buff 32), timestamp: (buff 4), nbits: (buff 4), nonce: (buff 4) }))
+(define-public (mint (recipient principal) (height uint) (tx (buff 1024)) (header (buff 80)) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}))
     (let
         (
             (token-id (+ (var-get last-token-id) u1))
-            (tx-was-mined (try! (contract-call? .clarity-bitcoin was-tx-mined height tx header proof)))
+            (tx-was-mined (try! (contract-call? 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.clarity-bitcoin-bitbadge was-tx-mined-compact height tx header proof)))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (is-eq tx-was-mined true) err-tx-not-mined)

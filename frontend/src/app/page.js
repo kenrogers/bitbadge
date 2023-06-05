@@ -14,7 +14,6 @@ import {
   bufferCV,
   bufferCVFromString,
   principalCV,
-  hexToCV,
   listCV,
 } from "@stacks/transactions";
 
@@ -33,6 +32,7 @@ export default function Home() {
   useEffect(() => {
     const intervalId = setInterval(() => {
       const txid = JSON.parse(localStorage.getItem("txid"));
+      console.log(txid);
       if (txid) {
         fetch(`https://blockstream.info/testnet/api/tx/${txid}/status`)
           .then((response) => response.json())
@@ -161,23 +161,24 @@ export default function Home() {
     });
 
     const txIndex = txMerkleProof.pos;
-    const hashes = txMerkleProof.merkle.map((hash) => bufferCVFromString(hash)); // Convert each hash to BufferCV
-    const treeDepth = txMerkleProof.merkle.length;
-
+    const hashes = txMerkleProof.merkle.map((hash) =>
+      bufferCV(Buffer.from(hash, "hex"))
+    ); // Convert each hash to BufferCV
+    console.log(txRaw);
     const functionArgs = [
       principalCV(userData.profile.stxAddress.testnet),
       uintCV(blockHeight),
-      hexToCV(txRaw),
+      bufferCV(Buffer.from(txRaw, "hex")),
+      bufferCV(Buffer.from(blockHeaderHex, "hex")),
       tupleCV({
         "tx-index": uintCV(txIndex),
         hashes: listCV(hashes),
-        "tree-depth": uintCV(treeDepth),
+        "tree-depth": uintCV(txMerkleProof.merkle.length),
       }),
-      clarityBlockHeader,
     ];
 
-    const contractAddress = "ST3D2AFTAJAJ4Z4N3HE3ZZ7WQ77YR9JCM50ED2JWB"; // Replace with your contract address
-    const contractName = "bitbadge-nft"; // Replace with your contract name
+    const contractAddress = "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H"; // Replace with your contract address
+    const contractName = "bitbadge-v2"; // Replace with your contract name
     const functionName = "mint"; // Replace with your function name
 
     const options = {
