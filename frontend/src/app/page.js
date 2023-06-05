@@ -15,6 +15,8 @@ import {
   bufferCVFromString,
   principalCV,
   listCV,
+  callReadOnlyFunction,
+  cvToString,
 } from "@stacks/transactions";
 
 export default function Home() {
@@ -25,6 +27,7 @@ export default function Home() {
     JSON.parse(localStorage.getItem("blockDetails")) || {}
   );
 
+  const network = new StacksTestnet();
   const appConfig = new AppConfig();
   const userSession = new UserSession({ appConfig });
 
@@ -32,7 +35,6 @@ export default function Home() {
   useEffect(() => {
     const intervalId = setInterval(() => {
       const txid = JSON.parse(localStorage.getItem("txid"));
-      console.log(txid);
       if (txid) {
         fetch(`https://blockstream.info/testnet/api/tx/${txid}/status`)
           .then((response) => response.json())
@@ -164,7 +166,9 @@ export default function Home() {
     const hashes = txMerkleProof.merkle.map((hash) =>
       bufferCV(Buffer.from(hash, "hex"))
     ); // Convert each hash to BufferCV
-    console.log(txRaw);
+
+    // reverse the tx id to pass in to the tx verification
+
     const functionArgs = [
       principalCV(userData.profile.stxAddress.testnet),
       uintCV(blockHeight),
@@ -178,7 +182,7 @@ export default function Home() {
     ];
 
     const contractAddress = "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H"; // Replace with your contract address
-    const contractName = "bitbadge-v2"; // Replace with your contract name
+    const contractName = "bitbadge-v3"; // Replace with your contract name
     const functionName = "mint"; // Replace with your function name
 
     const options = {
@@ -199,7 +203,6 @@ export default function Home() {
   };
 
   const getButtonState = () => {
-    console.log(localStorage.getItem("txStatus"));
     if (localStorage.getItem("txid")) {
       if (localStorage.getItem("txStatus") == "pending") {
         return {
@@ -225,6 +228,107 @@ export default function Home() {
     };
   };
 
+  const verifyMerkle = async () => {
+    const result = await callReadOnlyFunction({
+      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
+      contractName: "clarity-bitcoin-bitbadge",
+      functionName: "get-reversed-txid",
+      network,
+      functionArgs: [
+        bufferCV(Buffer.from(localStorage.getItem("txRaw"), "hex")),
+      ],
+      senderAddress: userData.profile.stxAddress.testnet,
+    });
+
+    // get merkle root
+    const blockHeight = blockDetails.block_height;
+    // Fetch the block hash
+    const blockHashResponse = await fetch(
+      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
+    );
+    const blockHash = await blockHashResponse.text();
+
+    // Fetch the block header
+    const blockHeaderResponse = await fetch(
+      `https://blockstream.info/testnet/api/block/${blockHash}/header`
+    );
+    const blockHeaderHex = await blockHeaderResponse.text();
+
+    const blockHeader = await callReadOnlyFunction({
+      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
+      contractName: "clarity-bitcoin-bitbadge",
+      functionName: "parse-block-header",
+      network,
+      functionArgs: [bufferCV(Buffer.from(blockHeaderHex, "hex"))],
+      senderAddress: userData.profile.stxAddress.testnet,
+    });
+    const merkleRoot = cvToString(blockHeader.value.data["merkle-root"]);
+
+    const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
+
+    const callVerify = await callReadOnlyFunction({
+      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
+      contractName: "clarity-bitcoin-bitbadge",
+      functionName: "verify-merkle-proof",
+      network,
+      functionArgs: [
+        result,
+        bufferCV(Buffer.from(merkleRoot, "hex")),
+        tupleCV({
+          "tx-index": uintCV(txMerkleProof.pos),
+          hashes: listCV(
+            txMerkleProof.merkle.map((hash) =>
+              bufferCV(Buffer.from(hash, "hex"))
+            )
+          ),
+          "tree-depth": uintCV(txMerkleProof.merkle.length),
+        }),
+      ],
+      senderAddress: userData.profile.stxAddress.testnet,
+    });
+    console.log(cvToString(callVerify.value));
+  };
+
+  const verifyTxMined = async () => {
+    const blockHeight = blockDetails.block_height;
+    // Fetch the block hash
+    const blockHashResponse = await fetch(
+      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
+    );
+    const blockHash = await blockHashResponse.text();
+
+    // Fetch the block header
+    const blockHeaderResponse = await fetch(
+      `https://blockstream.info/testnet/api/block/${blockHash}/header`
+    );
+    const blockHeaderHex = await blockHeaderResponse.text();
+    const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
+    // get the merkle root
+
+    const result = await callReadOnlyFunction({
+      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
+      contractName: "clarity-bitcoin-bitbadge-v3",
+      functionName: "was-tx-mined-compact",
+      network,
+      functionArgs: [
+        uintCV(blockDetails.block_height),
+        bufferCV(Buffer.from(localStorage.getItem("txRaw"), "hex")),
+        bufferCV(Buffer.from(blockHeaderHex, "hex")),
+        tupleCV({
+          "tx-index": uintCV(txMerkleProof.pos),
+          hashes: listCV(
+            txMerkleProof.merkle.map((hash) =>
+              bufferCV(Buffer.from(hash, "hex"))
+            )
+          ),
+          "tree-depth": uintCV(txMerkleProof.merkle.length),
+        }),
+      ],
+      senderAddress: userData.profile.stxAddress.testnet,
+    });
+    console.log(cvToString(result));
+  };
+
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-24">
       <h1 className="text-6xl font-bold text-center text-white">Bitbadges</h1>
@@ -242,7 +346,6 @@ export default function Home() {
             return (
               <>
                 <p className="text-xl text-white">{buttonState.instructions}</p>
-                {console.log(userData)}
                 <button
                   className="px-4 py-2 mt-4 text-lg font-bold text-white bg-indigo-600 rounded hover:bg-indigo-500"
                   onClick={buttonState.onClick}
@@ -259,6 +362,12 @@ export default function Home() {
             onClick={disconnectWallet}
           >
             Disconnect Wallet
+          </button>
+          <button
+            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
+            onClick={verifyMerkle}
+          >
+            Test
           </button>
         </>
       )}

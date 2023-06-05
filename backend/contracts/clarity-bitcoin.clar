@@ -1,3 +1,8 @@
+;; @contract stateless contract to verify bitcoin transaction
+;; @version 3
+
+;; version 3 fixes tx-was-mined
+
 ;; Error codes
 (define-constant ERR-OUT-OF-BOUNDS u1)
 (define-constant ERR-TOO-MANY-TXINS u2)
@@ -356,10 +361,11 @@
       (was-tx-mined-internal height tx header (get merkle-root block) proof)))
 
 (define-read-only (was-tx-mined (height uint) (tx (buff 1024)) (header { version: (buff 4), parent: (buff 32), merkle-root: (buff 32), timestamp: (buff 4), nbits: (buff 4), nonce: (buff 4) }) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}))
-    (was-tx-mined-internal height tx (contract-call? 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.clarity-bitcoin-helper concat-header header) (get merkle-root header) proof))
+    (was-tx-mined-internal height tx (contract-call? .clarity-bitcoin-helper concat-header header) (reverse-buff32 (get merkle-root header)) proof))
 
-;; Verify block header and merkle proof
-;; This function must only called with the merkle root of the provided header
+;; Verify block header and merkle proof.
+;; This function must only be called with the merkle root of the provided header.
+;; Use was-tx-mined-compact with header as a buffer or was-tx-mined with header as a tuple.
 (define-private (was-tx-mined-internal (height uint) (tx (buff 1024)) (header (buff 80)) (merkle-root (buff 32)) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}))
     (if (verify-block-header header height)
         (verify-merkle-proof (get-reversed-txid tx) (reverse-buff32 merkle-root) proof)

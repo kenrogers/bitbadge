@@ -36,7 +36,7 @@
     (let
         (
             (token-id (+ (var-get last-token-id) u1))
-            (tx-was-mined (try! (contract-call? 'ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H.clarity-bitcoin-bitbadge was-tx-mined-compact height tx header proof)))
+            (tx-was-mined (try! (contract-call? .clarity-bitcoin was-tx-mined-compact height tx header proof)))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (is-eq tx-was-mined true) err-tx-not-mined)
