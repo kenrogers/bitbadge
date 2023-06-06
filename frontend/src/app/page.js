@@ -20,6 +20,11 @@ import {
 } from "@stacks/transactions";
 import { hexToBytes } from "@stacks/common";
 
+const { contractAddress, contractName } = {
+  contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
+  contractName: "clarity-bitcoin-bitbadge-v3",
+};
+
 export default function Home() {
   const [userData, setUserData] = useState({});
   const [txid, setTxid] = useState(
@@ -234,17 +239,6 @@ export default function Home() {
   };
 
   const verifyMerkle = async () => {
-    const result = await callReadOnlyFunction({
-      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
-      contractName: "clarity-bitcoin-bitbadge",
-      functionName: "get-reversed-txid",
-      network,
-      functionArgs: [
-        bufferCV(Buffer.from(localStorage.getItem("txRaw"), "hex")),
-      ],
-      senderAddress: userData.profile.stxAddress.testnet,
-    });
-
     // get merkle root
     const blockHeight = blockDetails.block_height;
     // Fetch the block hash
@@ -260,8 +254,8 @@ export default function Home() {
     const blockHeaderHex = await blockHeaderResponse.text();
 
     const blockHeader = await callReadOnlyFunction({
-      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
-      contractName: "clarity-bitcoin-bitbadge",
+      contractAddress,
+      contractName,
       functionName: "parse-block-header",
       network,
       functionArgs: [bufferCV(Buffer.from(blockHeaderHex, "hex"))],
@@ -273,8 +267,8 @@ export default function Home() {
     const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
 
     const callVerify = await callReadOnlyFunction({
-      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
-      contractName: "clarity-bitcoin-bitbadge",
+      contractAddress,
+      contractName,
       functionName: "verify-merkle-proof",
       network,
       functionArgs: [
@@ -283,8 +277,8 @@ export default function Home() {
         tupleCV({
           "tx-index": uintCV(txMerkleProof.pos),
           hashes: listCV(
-            txMerkleProof.merkle.map((hash) =>
-              bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
+            txMerkleProof.merkle.map(
+              (hash) => bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
             )
           ),
           "tree-depth": uintCV(txMerkleProof.merkle.length),
@@ -293,6 +287,32 @@ export default function Home() {
       senderAddress: userData.profile.stxAddress.testnet,
     });
     console.log(cvToString(callVerify.value));
+  };
+
+  const verifyBlockHeader = async () => {
+    // get merkle root
+    const blockHeight = blockDetails.block_height;
+    // Fetch the block hash
+    const blockHashResponse = await fetch(
+      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
+    );
+    const blockHash = await blockHashResponse.text();
+
+    // Fetch the block header
+    const blockHeaderResponse = await fetch(
+      `https://blockstream.info/testnet/api/block/${blockHash}/header`
+    );
+    const blockHeaderHex = await blockHeaderResponse.text();
+
+    const callVerify = await callReadOnlyFunction({
+      contractAddress,
+      contractName,
+      functionName: "verify-block-header",
+      network,
+      functionArgs: [bufferCV(hexToBytes(blockHeaderHex)), uintCV(blockHeight)],
+      senderAddress: userData.profile.stxAddress.testnet,
+    });
+    console.log(cvToString(callVerify));
   };
 
   const verifyTxMined = async () => {
@@ -311,20 +331,24 @@ export default function Home() {
     const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
     // get the merkle root
 
+    const segwitToLegacy = (txHash) => {
+      return "0200000001549c30bfaa5d0f4aa3d760a7536f8b21d13094dabf95c7b61619f604540ca3720100000000ffffffff026400000000000000160014274ae586ad2035efb4c25049c155f98310d7e1066d93440000000000160014599bcef6387256c6b019030c421b4a4d382fe26000000000"
+    }
+
     const result = await callReadOnlyFunction({
-      contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
-      contractName: "clarity-bitcoin-bitbadge-v3",
+      contractAddress,
+      contractName,
       functionName: "was-tx-mined-compact",
       network,
       functionArgs: [
         uintCV(blockDetails.block_height),
-        bufferCV(Buffer.from(localStorage.getItem("txRaw"), "hex")),
-        bufferCV(Buffer.from(blockHeaderHex, "hex")),
+        bufferCV(hexToBytes(segwitToLegacy(localStorage.getItem("txRaw")))),
+        bufferCV(hexToBytes(blockHeaderHex)),
         tupleCV({
           "tx-index": uintCV(txMerkleProof.pos),
           hashes: listCV(
-            txMerkleProof.merkle.map((hash) =>
-              bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
+            txMerkleProof.merkle.map(
+              (hash) => bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
             )
           ),
           "tree-depth": uintCV(txMerkleProof.merkle.length),
@@ -374,6 +398,12 @@ export default function Home() {
             onClick={verifyMerkle}
           >
             Test Merkle Proof
+          </button>
+          <button
+            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
+            onClick={verifyBlockHeader}
+          >
+            Test Block Header
           </button>
           <button
             className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
