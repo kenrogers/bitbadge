@@ -18,10 +18,15 @@ import {
   callReadOnlyFunction,
   cvToString,
 } from "@stacks/transactions";
+import { hexToBytes } from "@stacks/common";
 
 export default function Home() {
   const [userData, setUserData] = useState({});
-  const [txid, setTxid] = useState(localStorage.getItem("txid"));
+  const [txid, setTxid] = useState(
+    localStorage.getItem("txid") === null
+      ? "689aedf463392ee9eebcb5e874daa1c970301d3166ec83da9faa4451d4a30637"
+      : localStorage.getItem("txid")
+  );
   const [txStatus, setTxStatus] = useState(localStorage.getItem("txStatus"));
   const [blockDetails, setBlockDetails] = useState(
     JSON.parse(localStorage.getItem("blockDetails")) || {}
@@ -262,7 +267,8 @@ export default function Home() {
       functionArgs: [bufferCV(Buffer.from(blockHeaderHex, "hex"))],
       senderAddress: userData.profile.stxAddress.testnet,
     });
-    const merkleRoot = cvToString(blockHeader.value.data["merkle-root"]);
+
+    const merkleRootBuffer = blockHeader.value.data["merkle-root"].buffer;
 
     const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
 
@@ -272,13 +278,13 @@ export default function Home() {
       functionName: "verify-merkle-proof",
       network,
       functionArgs: [
-        result,
-        bufferCV(Buffer.from(merkleRoot, "hex")),
+        bufferCV(hexToBytes(txid).reverse()), // lib needs reversed txid
+        bufferCV(merkleRootBuffer.reverse()), // lib needs reversed root
         tupleCV({
           "tx-index": uintCV(txMerkleProof.pos),
           hashes: listCV(
             txMerkleProof.merkle.map((hash) =>
-              bufferCV(Buffer.from(hash, "hex"))
+              bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
             )
           ),
           "tree-depth": uintCV(txMerkleProof.merkle.length),
@@ -318,7 +324,7 @@ export default function Home() {
           "tx-index": uintCV(txMerkleProof.pos),
           hashes: listCV(
             txMerkleProof.merkle.map((hash) =>
-              bufferCV(Buffer.from(hash, "hex"))
+              bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
             )
           ),
           "tree-depth": uintCV(txMerkleProof.merkle.length),
@@ -367,7 +373,13 @@ export default function Home() {
             className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
             onClick={verifyMerkle}
           >
-            Test
+            Test Merkle Proof
+          </button>
+          <button
+            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
+            onClick={verifyTxMined}
+          >
+            Test tx
           </button>
         </>
       )}
