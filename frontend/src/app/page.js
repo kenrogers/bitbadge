@@ -12,36 +12,22 @@ import {
   tupleCV,
   uintCV,
   bufferCV,
-  bufferCVFromString,
   principalCV,
   listCV,
-  callReadOnlyFunction,
-  cvToString,
 } from "@stacks/transactions";
 import { hexToBytes } from "@stacks/common";
-
-const { contractAddress, contractName } = {
-  contractAddress: "ST3QFME3CANQFQNR86TYVKQYCFT7QX4PRXM1V9W6H",
-  contractName: "clarity-bitcoin-bitbadge-v3",
-};
+import { Transaction, networks, payments } from "bitcoinjs-lib";
 
 export default function Home() {
   const [userData, setUserData] = useState({});
-  const [txid, setTxid] = useState(
-    localStorage.getItem("txid") === null
-      ? "689aedf463392ee9eebcb5e874daa1c970301d3166ec83da9faa4451d4a30637"
-      : localStorage.getItem("txid")
-  );
-  const [txStatus, setTxStatus] = useState(localStorage.getItem("txStatus"));
   const [blockDetails, setBlockDetails] = useState(
     JSON.parse(localStorage.getItem("blockDetails")) || {}
   );
 
-  const network = new StacksTestnet();
   const appConfig = new AppConfig();
   const userSession = new UserSession({ appConfig });
 
-  // Effect hook to check and see if the tx has been confirmed using mempool.space API
+  // Effect hook to check and see if the tx has been confirmed using blockstream API
   useEffect(() => {
     const intervalId = setInterval(() => {
       const txid = JSON.parse(localStorage.getItem("txid"));
@@ -125,14 +111,37 @@ export default function Home() {
       amount: "100",
     });
 
-    console.log(resp.result.txid);
-
     // Storing txid in local storage
     if (typeof window !== "undefined") {
       localStorage.setItem("txid", JSON.stringify(resp.result.txid));
     }
 
     localStorage.setItem("txStatus", "pending");
+  };
+
+  const removeWitnessData = (txHex) => {
+    const tx = Transaction.fromHex(txHex);
+
+    // Create a new empty transaction
+    const newTx = new Transaction();
+
+    // Copy version from original transaction
+    newTx.version = tx.version;
+
+    // Copy inputs from original transaction
+    tx.ins.forEach((input) => {
+      newTx.addInput(input.hash, input.index);
+    });
+
+    // Copy outputs from original transaction
+    tx.outs.forEach((output) => {
+      newTx.addOutput(output.script, output.value);
+    });
+
+    // Copy locktime from original transaction
+    newTx.locktime = tx.locktime;
+
+    return newTx.toHex();
   };
 
   // This function retrieves raw transaction and merkle proof from localStorage and calls the mint Clarity function
@@ -142,8 +151,14 @@ export default function Home() {
     let txMerkleProof = "";
 
     if (typeof window !== "undefined") {
-      txRaw = localStorage.getItem("txRaw");
+      txRaw = removeWitnessData(localStorage.getItem("txRaw"));
       txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
+    }
+
+    // First we need to verify that the sender of this transaction is the same as the user that is signed in
+    if (!verifyCorrectSender()) {
+      console.log("wrong sender");
+      return false;
     }
 
     const blockHeight = blockDetails.block_height;
@@ -160,24 +175,10 @@ export default function Home() {
     );
     const blockHeaderHex = await blockHeaderResponse.text();
 
-    // Convert the block header fields to BufferCV
-    const clarityBlockHeader = tupleCV({
-      version: bufferCV(Buffer.from(blockHeaderHex.slice(0, 8), "hex")),
-      parent: bufferCV(Buffer.from(blockHeaderHex.slice(8, 72), "hex")),
-      "merkle-root": bufferCV(
-        Buffer.from(blockHeaderHex.slice(72, 136), "hex")
-      ),
-      timestamp: bufferCV(Buffer.from(blockHeaderHex.slice(136, 144), "hex")),
-      nbits: bufferCV(Buffer.from(blockHeaderHex.slice(144, 152), "hex")),
-      nonce: bufferCV(Buffer.from(blockHeaderHex.slice(152, 160), "hex")),
-    });
-
     const txIndex = txMerkleProof.pos;
-    const hashes = txMerkleProof.merkle.map((hash) =>
-      bufferCV(Buffer.from(hash, "hex"))
-    ); // Convert each hash to BufferCV
-
-    // reverse the tx id to pass in to the tx verification
+    const hashes = txMerkleProof.merkle.map(
+      (hash) => bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
+    ); // Convert each hash to BufferCV and reverse it
 
     const functionArgs = [
       principalCV(userData.profile.stxAddress.testnet),
@@ -212,6 +213,28 @@ export default function Home() {
     await openContractCall(options);
   };
 
+  const publicKeyToP2WPKHAddress = (publicKey, network) => {
+    const p2wpkh = payments.p2wpkh({
+      pubkey: publicKey,
+      network: network,
+    });
+
+    return p2wpkh.address;
+  };
+
+  const verifyCorrectSender = () => {
+    const txRaw = localStorage.getItem("txRaw");
+    const tx = Transaction.fromHex(txRaw);
+    const witness = tx.ins[0].witness;
+    const publicKey = witness[witness.length - 1]; // The public key is the last item in the witness stack
+
+    const address = publicKeyToP2WPKHAddress(publicKey, networks.testnet);
+    if (address === userData.profile.btcAddress.p2wpkh.testnet) {
+      return true;
+    }
+    return false;
+  };
+
   const getButtonState = () => {
     if (localStorage.getItem("txid")) {
       if (localStorage.getItem("txStatus") == "pending") {
@@ -236,127 +259,6 @@ export default function Home() {
       disabled: false,
       instructions: "Step 1: Reserve your Bitbadge by sending 100 sats",
     };
-  };
-
-  const verifyMerkle = async () => {
-    // get merkle root
-    const blockHeight = blockDetails.block_height;
-    // Fetch the block hash
-    const blockHashResponse = await fetch(
-      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
-    );
-    const blockHash = await blockHashResponse.text();
-
-    // Fetch the block header
-    const blockHeaderResponse = await fetch(
-      `https://blockstream.info/testnet/api/block/${blockHash}/header`
-    );
-    const blockHeaderHex = await blockHeaderResponse.text();
-
-    const blockHeader = await callReadOnlyFunction({
-      contractAddress,
-      contractName,
-      functionName: "parse-block-header",
-      network,
-      functionArgs: [bufferCV(Buffer.from(blockHeaderHex, "hex"))],
-      senderAddress: userData.profile.stxAddress.testnet,
-    });
-
-    const merkleRootBuffer = blockHeader.value.data["merkle-root"].buffer;
-
-    const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
-
-    const callVerify = await callReadOnlyFunction({
-      contractAddress,
-      contractName,
-      functionName: "verify-merkle-proof",
-      network,
-      functionArgs: [
-        bufferCV(hexToBytes(txid).reverse()), // lib needs reversed txid
-        bufferCV(merkleRootBuffer.reverse()), // lib needs reversed root
-        tupleCV({
-          "tx-index": uintCV(txMerkleProof.pos),
-          hashes: listCV(
-            txMerkleProof.merkle.map(
-              (hash) => bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
-            )
-          ),
-          "tree-depth": uintCV(txMerkleProof.merkle.length),
-        }),
-      ],
-      senderAddress: userData.profile.stxAddress.testnet,
-    });
-    console.log(cvToString(callVerify.value));
-  };
-
-  const verifyBlockHeader = async () => {
-    // get merkle root
-    const blockHeight = blockDetails.block_height;
-    // Fetch the block hash
-    const blockHashResponse = await fetch(
-      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
-    );
-    const blockHash = await blockHashResponse.text();
-
-    // Fetch the block header
-    const blockHeaderResponse = await fetch(
-      `https://blockstream.info/testnet/api/block/${blockHash}/header`
-    );
-    const blockHeaderHex = await blockHeaderResponse.text();
-
-    const callVerify = await callReadOnlyFunction({
-      contractAddress,
-      contractName,
-      functionName: "verify-block-header",
-      network,
-      functionArgs: [bufferCV(hexToBytes(blockHeaderHex)), uintCV(blockHeight)],
-      senderAddress: userData.profile.stxAddress.testnet,
-    });
-    console.log(cvToString(callVerify));
-  };
-
-  const verifyTxMined = async () => {
-    const blockHeight = blockDetails.block_height;
-    // Fetch the block hash
-    const blockHashResponse = await fetch(
-      `https://blockstream.info/testnet/api/block-height/${blockHeight}`
-    );
-    const blockHash = await blockHashResponse.text();
-
-    // Fetch the block header
-    const blockHeaderResponse = await fetch(
-      `https://blockstream.info/testnet/api/block/${blockHash}/header`
-    );
-    const blockHeaderHex = await blockHeaderResponse.text();
-    const txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
-    // get the merkle root
-
-    const segwitToLegacy = (txHash) => {
-      return "0200000001549c30bfaa5d0f4aa3d760a7536f8b21d13094dabf95c7b61619f604540ca3720100000000ffffffff026400000000000000160014274ae586ad2035efb4c25049c155f98310d7e1066d93440000000000160014599bcef6387256c6b019030c421b4a4d382fe26000000000"
-    }
-
-    const result = await callReadOnlyFunction({
-      contractAddress,
-      contractName,
-      functionName: "was-tx-mined-compact",
-      network,
-      functionArgs: [
-        uintCV(blockDetails.block_height),
-        bufferCV(hexToBytes(segwitToLegacy(localStorage.getItem("txRaw")))),
-        bufferCV(hexToBytes(blockHeaderHex)),
-        tupleCV({
-          "tx-index": uintCV(txMerkleProof.pos),
-          hashes: listCV(
-            txMerkleProof.merkle.map(
-              (hash) => bufferCV(hexToBytes(hash).reverse()) // lib needs reversed hashes
-            )
-          ),
-          "tree-depth": uintCV(txMerkleProof.merkle.length),
-        }),
-      ],
-      senderAddress: userData.profile.stxAddress.testnet,
-    });
-    console.log(cvToString(result));
   };
 
   return (
@@ -392,24 +294,6 @@ export default function Home() {
             onClick={disconnectWallet}
           >
             Disconnect Wallet
-          </button>
-          <button
-            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
-            onClick={verifyMerkle}
-          >
-            Test Merkle Proof
-          </button>
-          <button
-            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
-            onClick={verifyBlockHeader}
-          >
-            Test Block Header
-          </button>
-          <button
-            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
-            onClick={verifyTxMined}
-          >
-            Test tx
           </button>
         </>
       )}
