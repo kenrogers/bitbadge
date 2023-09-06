@@ -16,7 +16,11 @@ import {
   listCV,
 } from "@stacks/transactions";
 import { hexToBytes } from "@stacks/common";
-import { Transaction, networks, payments } from "bitcoinjs-lib";
+import { Transaction } from "bitcoinjs-lib";
+import { hex, base64 } from "@scure/base";
+import * as btc from "@scure/btc-signer";
+import { bytesToHex } from "@noble/hashes/utils";
+import { getAddress, signTransaction } from "sats-connect";
 
 export default function Home() {
   const [userData, setUserData] = useState({});
@@ -104,11 +108,246 @@ export default function Home() {
     setUserData({});
   };
 
+  const setAddress = async (address) => {
+    setXverseAddress(address);
+  };
+
+  const createPsbtWithOpReturnXverse = async () => {
+    // First get the address
+    let xverseAddress;
+    let xversePubKey;
+    const getAddressOptions = {
+      payload: {
+        purposes: ["payment"],
+        message: "Address for receiving payments",
+        network: {
+          type: "Testnet",
+        },
+      },
+      onFinish: async (response) => {
+        console.log(response.addresses[0]);
+        xverseAddress = response.addresses[0].address;
+        xversePubKey = response.addresses[0].publicKey;
+      },
+      onCancel: () => alert("Request canceled"),
+    };
+    await getAddress(getAddressOptions);
+
+    const testnet = {
+      bech32: "tb",
+      pubKeyHash: 0x6f,
+      scriptHash: 0xc4,
+      wif: 0xef,
+    };
+
+    const p2wpkh = btc.p2wpkh(xversePubKey, testnet);
+
+    const psbt = new btc.Transaction({
+      allowUnknowOutput: true,
+      network: testnet,
+    });
+
+    // Use the blockstream API to get the utxo set of the authenticated address
+    const address = xverseAddress;
+    const utxoSetResponse = await fetch(
+      `https://blockstream.info/testnet/api/address/${address}/utxo`
+    );
+    const utxoSet = await utxoSetResponse.json();
+
+    // Add each utxo to the psbt as an input
+    let inputIndexes = [];
+    let totalValue = 0;
+    for (let [index, utxo] of utxoSet.entries()) {
+      if (utxo.value > 100) {
+        psbt.addInput({
+          index: index,
+          txid: utxo.txid,
+          witnessUtxo: {
+            amount: BigInt(utxo.value),
+            script: p2wpkh.script,
+          },
+        });
+        totalValue = utxo.value;
+        inputIndexes.push(index);
+        break;
+      } else if (totalValue < 100) {
+        totalValue += utxo.value;
+        psbt.addInput({
+          index: index,
+          txid: utxo.txid,
+          witnessUtxo: {
+            amount: BigInt(utxo.value),
+            script: p2wpkh.script,
+          },
+        });
+        inputIndexes.push(index);
+      }
+    }
+
+    // Calculate the change to be sent back to the sender
+    const change = totalValue - 100;
+
+    // Subtract transaction fee from the change
+    const changeAfterFee = change - 1000;
+
+    if (changeAfterFee > 0) {
+      psbt.addOutputAddress(xverseAddress, BigInt(changeAfterFee), testnet);
+    }
+
+    // Add 100 sats output to recipient
+    psbt.addOutputAddress(
+      "tb1qya9wtp4dyq67ldxz2pyuz40esvgd0cgx9s3pjl",
+      100n,
+      testnet
+    );
+
+    const data = new TextEncoder().encode("test");
+    psbt.addOutput({
+      script: btc.Script.encode([btc.OP.RETURN, data]),
+      amount: 0n,
+    });
+
+    const psbtFormatted = psbt.toPSBT();
+
+    // Xverse Process
+    const base64PSBT = base64.encode(psbtFormatted);
+
+    const signPsbtOptions = {
+      payload: {
+        network: {
+          type: "Testnet",
+        },
+        message: "Sign Transaction",
+        psbtBase64: base64PSBT,
+        broadcast: true,
+        inputsToSign: [
+          {
+            address: xverseAddress,
+            signingIndexes: inputIndexes,
+          },
+        ],
+      },
+      onFinish: (response) => {
+        console.log(response.psbtBase64);
+        alert(response.psbtBase64);
+      },
+      onCancel: () => alert("Canceled"),
+    };
+
+    await signTransaction(signPsbtOptions);
+
+    // Hiro Wallet Process
+    // console.log(bytesToHex(psbtFormatted));
+
+    // const result = await window.btc.request("signPsbt", {
+    //   publicKey: userData.profile.btcPublicKey.p2wpkh,
+    //   hex: bytesToHex(psbtFormatted),
+    //   network: "testnet",
+    // });
+
+    // console.log(result);
+  };
+
+  const createPsbtWithOpReturnLeather = async () => {
+    const testnet = {
+      bech32: "tb",
+      pubKeyHash: 0x6f,
+      scriptHash: 0xc4,
+      wif: 0xef,
+    };
+
+    const pubKey = userData.profile.btcPublicKey.p2wpkh;
+
+    const p2wpkh = btc.p2wpkh(pubKey, testnet);
+
+    const psbt = new btc.Transaction({
+      allowUnknowOutput: true,
+      network: testnet,
+    });
+
+    // Use the blockstream API to get the utxo set of the authenticated address
+    const address = userData.profile.btcAddress.p2wpkh.testnet;
+    const utxoSetResponse = await fetch(
+      `https://blockstream.info/testnet/api/address/${address}/utxo`
+    );
+    const utxoSet = await utxoSetResponse.json();
+
+    // Add each utxo to the psbt as an input
+    let inputIndexes = [];
+    let totalValue = 0;
+    for (let [index, utxo] of utxoSet.entries()) {
+      if (utxo.value > 100) {
+        psbt.addInput({
+          index: index,
+          txid: utxo.txid,
+          witnessUtxo: {
+            amount: BigInt(utxo.value),
+            script: p2wpkh.script,
+          },
+        });
+        totalValue = utxo.value;
+        inputIndexes.push(index);
+        break;
+      } else if (totalValue < 100) {
+        totalValue += utxo.value;
+        psbt.addInput({
+          index: index,
+          txid: utxo.txid,
+          witnessUtxo: {
+            amount: BigInt(utxo.value),
+            script: p2wpkh.script,
+          },
+        });
+        inputIndexes.push(index);
+      }
+    }
+
+    // Calculate the change to be sent back to the sender
+    const change = totalValue - 100;
+
+    // Subtract transaction fee from the change
+    const changeAfterFee = change - 1000;
+
+    if (changeAfterFee > 0) {
+      psbt.addOutputAddress(
+        userData.profile.btcAddress.p2wpkh.testnet,
+        BigInt(changeAfterFee),
+        testnet
+      );
+    }
+
+    // Add 100 sats output to recipient
+    psbt.addOutputAddress(
+      "tb1qya9wtp4dyq67ldxz2pyuz40esvgd0cgx9s3pjl",
+      100n,
+      testnet
+    );
+
+    const data = new TextEncoder().encode("test");
+    psbt.addOutput({
+      script: btc.Script.encode([btc.OP.RETURN, data]),
+      amount: 0n,
+    });
+
+    const psbtFormatted = psbt.toPSBT();
+
+    console.log(bytesToHex(psbtFormatted));
+
+    const result = await window.btc.request("signPsbt", {
+      publicKey: userData.profile.btcPublicKey.p2wpkh,
+      hex: bytesToHex(psbtFormatted),
+      network: "testnet",
+    });
+
+    console.log(result);
+  };
+
   // This function sends a Bitcoin transaction and stores the raw transaction and merkle proof in localStorage
   const reserveBitbadge = async () => {
     const resp = await window.btc?.request("sendTransfer", {
       address: "tb1qya9wtp4dyq67ldxz2pyuz40esvgd0cgx9s3pjl",
       amount: "100",
+      network: "testnet",
     });
 
     // Storing txid in local storage
@@ -153,12 +392,6 @@ export default function Home() {
     if (typeof window !== "undefined") {
       txRaw = removeWitnessData(localStorage.getItem("txRaw"));
       txMerkleProof = JSON.parse(localStorage.getItem("txMerkleProof"));
-    }
-
-    // First we need to verify that the sender of this transaction is the same as the user that is signed in
-    if (!verifyCorrectSender()) {
-      console.log("wrong sender");
-      return false;
     }
 
     const blockHeight = blockDetails.block_height;
@@ -211,28 +444,6 @@ export default function Home() {
     };
 
     await openContractCall(options);
-  };
-
-  const publicKeyToP2WPKHAddress = (publicKey, network) => {
-    const p2wpkh = payments.p2wpkh({
-      pubkey: publicKey,
-      network: network,
-    });
-
-    return p2wpkh.address;
-  };
-
-  const verifyCorrectSender = () => {
-    const txRaw = localStorage.getItem("txRaw");
-    const tx = Transaction.fromHex(txRaw);
-    const witness = tx.ins[0].witness;
-    const publicKey = witness[witness.length - 1]; // The public key is the last item in the witness stack
-
-    const address = publicKeyToP2WPKHAddress(publicKey, networks.testnet);
-    if (address === userData.profile.btcAddress.p2wpkh.testnet) {
-      return true;
-    }
-    return false;
   };
 
   const getButtonState = () => {
@@ -294,6 +505,12 @@ export default function Home() {
             onClick={disconnectWallet}
           >
             Disconnect Wallet
+          </button>
+          <button
+            className="px-4 py-2 mt-4 text-lg font-bold text-indigo-600 bg-white rounded hover:bg-indigo-500"
+            onClick={createPsbtWithOpReturnLeather}
+          >
+            Send PSBT
           </button>
         </>
       )}

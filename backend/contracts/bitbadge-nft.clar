@@ -32,11 +32,12 @@
     )
 )
 
-(define-public (mint (recipient principal) (height uint) (tx (buff 1024)) (header (buff 80)) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}))
+(define-public (mint (recipient principal) (tx (buff 1024)) (header (buff 80)) (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint}))
     (let
         (
             (token-id (+ (var-get last-token-id) u1))
-            (tx-was-mined (try! (contract-call? .clarity-bitcoin was-tx-mined-compact height tx header proof)))
+            (block (try! (contract-call? .clarity-bitcoin parse-block-header header)))
+            (tx-was-mined (try! (contract-call? .clarity-bitcoin was-wtx-mined-compact tx (get merkle-root block) proof)))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (asserts! (is-eq tx-was-mined true) err-tx-not-mined)
